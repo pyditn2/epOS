@@ -1,19 +1,27 @@
 #include <Arduino.h>
 #include "lvgl.h"
 #include "rm67162.h"
+#include <SPI.h>
+#include <SD.h>  // === SD STUFF BEGIN ===
 
 #ifndef BOARD_HAS_PSRAM
 #error "PSRAM is required. Please enable OPI PSRAM in your settings."
 #endif
 
-// Updated GPIO pins for rotary encoder
-#define ENCODER_CLK 2   // GPIO2
-#define ENCODER_DT  1   // GPIO1
-#define ENCODER_SW  3   // GPIO3
+// Rotary encoder
+#define ENCODER_CLK 2
+#define ENCODER_DT  1
+#define ENCODER_SW  3
 
-#define BATTERY_ADC_CHANNEL ADC1_CHANNEL_4  // GPIO4
+#define BATTERY_ADC_CHANNEL ADC1_CHANNEL_4
 #define BATTERY_MIN_VOLTAGE 3.3
 #define BATTERY_MAX_VOLTAGE 4.2
+
+// SD card SPI pins (adjust as needed)
+#define SD_CS    10
+#define SD_MISO  13
+#define SD_MOSI  11
+#define SD_SCK   12
 
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t *buf;
@@ -21,18 +29,17 @@ static lv_color_t *buf;
 static lv_obj_t *label_counter;
 static lv_obj_t *anim_rect;
 static lv_obj_t *label_battery;
+static lv_obj_t *label_sd_status;
+static lv_obj_t *label_sd_list;
 
 int counter = 0;
 int last_clk_state = HIGH;
 int last_sw_state = HIGH;
-
 int anim_x = 10;
 int anim_direction = 1;
 
 bool pressed_displayed = false;
 unsigned long press_display_time = 0;
-
-
 unsigned long last_battery_update = 0;
 
 void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
@@ -43,7 +50,7 @@ void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color
 }
 
 float readBatteryVoltage() {
-    int raw = analogRead(4);  // GPIO4
+    int raw = analogRead(4);
     return (raw / 4095.0f) * 3.3f * 2.0f;
 }
 
@@ -54,14 +61,69 @@ int batteryPercentFromVoltage(float voltage) {
 
 void update_battery() {
     float voltage = readBatteryVoltage();
-
     char raw[32];
     snprintf(raw, sizeof(raw), "%.2f V raw", voltage);
     lv_label_set_text(label_battery, raw);
 }
 
+void update_animation() {
+    anim_x += anim_direction;
+    if (anim_x > 280) anim_direction = -1;
+    if (anim_x < 10) anim_direction = 1;
+
+    lv_obj_set_x(anim_rect, anim_x);
+}
+
+void update_encoder() {
+    int clk = digitalRead(ENCODER_CLK);
+    int dt  = digitalRead(ENCODER_DT);
+    int sw  = digitalRead(ENCODER_SW);
+
+    if (clk != last_clk_state) {
+        if (dt != clk) counter++;
+        else counter--;
+        lv_label_set_text_fmt(label_counter, "%d", counter);
+        last_clk_state = clk;
+        delay(5);
+    }
+
+    if (sw == LOW && last_sw_state == HIGH) {
+        lv_label_set_text(label_counter, "Pressed!");
+        pressed_displayed = true;
+        press_display_time = millis();
+    }
+    last_sw_state = sw;
+
+    if (pressed_displayed && millis() - press_display_time > 300) {
+        lv_label_set_text_fmt(label_counter, "%d", counter);
+        pressed_displayed = false;
+    }
+}
+
+// === SD STUFF BEGIN ===
+
+void list_sd_files() {
+    File root = SD.open("/");
+    String allNames;
+
+    if (!root || !root.isDirectory()) {
+        lv_label_set_text(label_sd_status, "SD mount failed");
+        return;
+    }
+
+    File file = root.openNextFile();
+    while (file) {
+        allNames += file.name();
+        allNames += "\n";
+        file = root.openNextFile();
+    }
+
+    lv_label_set_text(label_sd_list, allNames.c_str());
+}
+
+// === SD STUFF END ===
+
 void setup() {
-    // Enable pull-ups for stable reading
     pinMode(ENCODER_CLK, INPUT_PULLUP);
     pinMode(ENCODER_DT, INPUT_PULLUP);
     pinMode(ENCODER_SW, INPUT_PULLUP);
@@ -87,8 +149,8 @@ void setup() {
 
     label_counter = lv_label_create(screen);
     lv_label_set_text_fmt(label_counter, "%d", counter);
-    lv_obj_set_style_text_color(label_counter, lv_color_white(), 0);  // ✅ Make it visible
-    lv_obj_center(label_counter);
+    lv_obj_set_style_text_color(label_counter, lv_color_white(), 0);
+    lv_obj_align(label_counter, LV_ALIGN_TOP_MID, 0, 0);
 
     anim_rect = lv_obj_create(screen);
     lv_obj_set_size(anim_rect, 20, 20);
@@ -100,45 +162,26 @@ void setup() {
     lv_obj_set_style_text_color(label_battery, lv_color_hex(0x00FF00), 0);
     lv_obj_align(label_battery, LV_ALIGN_TOP_RIGHT, -8, 4);
     lv_label_set_text(label_battery, "--%");
-}
 
-void update_animation() {
-    anim_x += anim_direction;
-    if (anim_x > 280) anim_direction = -1;
-    if (anim_x < 10) anim_direction = 1;
+    label_sd_status = lv_label_create(screen);
+    lv_obj_set_style_text_color(label_sd_status, lv_color_hex(0xCCCCCC), 0);
+    lv_obj_align(label_sd_status, LV_ALIGN_BOTTOM_LEFT, 4, -4);
+    lv_label_set_text(label_sd_status, "SD: Init...");
 
-    lv_obj_set_x(anim_rect, anim_x);
-}
+    label_sd_list = lv_label_create(screen);
+    lv_obj_set_style_text_color(label_sd_list, lv_color_hex(0xAAAAFF), 0);
+    lv_obj_align(label_sd_list, LV_ALIGN_BOTTOM_LEFT, 4, -24);
+    lv_label_set_long_mode(label_sd_list, LV_LABEL_LONG_SCROLL);
+    lv_obj_set_width(label_sd_list, 280);
 
-void update_encoder() {
-    int clk = digitalRead(ENCODER_CLK);
-    int dt  = digitalRead(ENCODER_DT);
-    int sw  = digitalRead(ENCODER_SW);
-
-    if (clk != last_clk_state) {
-        if (dt != clk) {
-            counter++;
-        } else {
-            counter--;
-        }
-        lv_label_set_text_fmt(label_counter, "%d", counter);
-        last_clk_state = clk;
-        delay(5);
+    // SPI SD Setup
+    SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+    if (!SD.begin(SD_CS)) {
+        lv_label_set_text(label_sd_status, "SD mount failed!");
+    } else {
+        lv_label_set_text(label_sd_status, "SD mounted");
+        list_sd_files();
     }
-
-    if (sw == LOW && last_sw_state == HIGH) {
-    lv_label_set_text(label_counter, "Pressed!");
-    pressed_displayed = true;
-    press_display_time = millis();
-}
-last_sw_state = sw;
-
-// Handle restoring counter text after 300ms
-if (pressed_displayed && millis() - press_display_time > 300) {
-    lv_label_set_text_fmt(label_counter, "%d", counter);
-    pressed_displayed = false;
-}
-
 }
 
 void loop() {
