@@ -18,7 +18,7 @@ namespace {
 
 void HardwareService::init() {
     EncoderManager::begin(ENCODER_CLK, ENCODER_DT, ENCODER_SW);
-    SDCardManager::begin(SD_CS, SD_MISO, SD_MOSI, SD_SCK);
+    //SDCardManager::begin(SD_CS, SD_MISO, SD_MOSI, SD_SCK);
 }
 
 void HardwareService::update() {
@@ -55,4 +55,9 @@ bool HardwareService::tryLockSD() {
 
 void HardwareService::unlockSD() {
     sdLocked = false;
+}
+
+float HardwareService::readBatteryVoltage() {
+    int raw = analogRead(4);
+    return (raw / 4095.0f) * 3.3f * 2.0f;
 }

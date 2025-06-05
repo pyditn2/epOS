@@ -16,4 +16,5 @@ namespace HardwareService {
     File openFile(const char* path, const char* mode);
     bool tryLockSD();
     void unlockSD();
+    float readBatteryVoltage();
 }

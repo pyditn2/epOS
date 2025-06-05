@@ -4,78 +4,14 @@
 #include "pins_config.h"
 
 #include "os/HardwareService.h"
+#include "ui/StatusBarManager.h"
 
 #define BATTERY_ADC_CHANNEL ADC1_CHANNEL_4
 #define BATTERY_MIN_VOLTAGE 3.3
 #define BATTERY_MAX_VOLTAGE 4.2
 
-#define SD_CS    10
-#define SD_MISO  13
-#define SD_MOSI  11
-#define SD_SCK   12
-
-#define ENCODER_CLK 2
-#define ENCODER_DT  1
-#define ENCODER_SW  3
-
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t *buf;
-
-static lv_obj_t *label_counter;
-static lv_obj_t *label_pressed;
-static lv_obj_t *label_battery;
-static lv_obj_t *label_sd_status;
-static lv_obj_t *label_sd_list;
-static lv_obj_t *anim_rect;
-
-int counter = 0;
-int anim_x = 10;
-int anim_direction = 1;
-unsigned long last_battery_update = 0;
-unsigned long press_display_time = 0;
-bool pressed_displayed = false;
-
-float readBatteryVoltage() {
-    int raw = analogRead(4);
-    return (raw / 4095.0f) * 3.3f * 2.0f;
-}
-
-int batteryPercentFromVoltage(float voltage) {
-    int percent = (int)((voltage - BATTERY_MIN_VOLTAGE) / (BATTERY_MAX_VOLTAGE - BATTERY_MIN_VOLTAGE) * 100.0f);
-    return constrain(percent, 0, 100);
-}
-
-void update_battery() {
-    float voltage = readBatteryVoltage();
-    char raw[32];
-    snprintf(raw, sizeof(raw), "%.2f V", voltage);
-    lv_label_set_text(label_battery, raw);
-}
-
-void update_animation() {
-    anim_x += anim_direction;
-    if (anim_x > 280) anim_direction = -1;
-    if (anim_x < 10) anim_direction = 1;
-    lv_obj_set_x(anim_rect, anim_x);
-}
-
-void update_encoder() {
-    HardwareService::update();
-    int delta = HardwareService::getEncoderDelta();
-    if (delta != 0) {
-        counter += delta;
-        lv_label_set_text_fmt(label_counter, "%d", counter);
-    }
-    if (HardwareService::wasEncoderPressed()) {
-        lv_label_set_text(label_pressed, "Pressed!");
-        pressed_displayed = true;
-        press_display_time = millis();
-    }
-    if (pressed_displayed && millis() - press_display_time > 500) {
-        lv_label_set_text(label_pressed, "");
-        pressed_displayed = false;
-    }
-}
 
 
 void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
@@ -86,13 +22,17 @@ void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color
 }
 
 void setup() {
+    // Initialize the display hardware
     rm67162_init();
-    lcd_setRotation(3);
-
+    lcd_setRotation(1);
+    
+    // Start LVGL
     lv_init();
+    
+    // Allocate buffer WITHOUT explicitly setting it to zeros
     buf = (lv_color_t *)ps_malloc(sizeof(lv_color_t) * LVGL_LCD_BUF_SIZE);
     assert(buf);
-
+    
     lv_disp_draw_buf_init(&draw_buf, buf, NULL, LVGL_LCD_BUF_SIZE);
     static lv_disp_drv_t disp_drv;
     lv_disp_drv_init(&disp_drv);
@@ -102,68 +42,61 @@ void setup() {
     disp_drv.draw_buf = &draw_buf;
     lv_disp_drv_register(&disp_drv);
 
+    // Set the screen background color directly using lv_scr_act()
+    lv_obj_set_style_bg_color(lv_scr_act(), lv_color_black(), 0);
+    
+    // Use the existing screen instead of creating a new one
     lv_obj_t *screen = lv_scr_act();
-    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
-
-    label_counter = lv_label_create(screen);
-    lv_label_set_text_fmt(label_counter, "%d", counter);
-    lv_obj_set_style_text_color(label_counter, lv_color_white(), 0);
-    lv_obj_align(label_counter, LV_ALIGN_TOP_MID, 0, 0);
-
-    label_pressed = lv_label_create(screen);
-    lv_label_set_text(label_pressed, "");
-    lv_obj_set_style_text_color(label_pressed, lv_color_hex(0xFF8800), 0);
-    lv_obj_align(label_pressed, LV_ALIGN_TOP_MID, 0, 20);
-
-    label_battery = lv_label_create(screen);
-    lv_obj_set_style_text_color(label_battery, lv_color_hex(0x00FF00), 0);
-    lv_obj_align(label_battery, LV_ALIGN_TOP_RIGHT, -8, 4);
-    lv_label_set_text(label_battery, "--%");
-
-    label_sd_status = lv_label_create(screen);
-    lv_obj_set_style_text_color(label_sd_status, lv_color_hex(0xCCCCCC), 0);
-    lv_obj_align(label_sd_status, LV_ALIGN_BOTTOM_LEFT, 4, -4);
-
-    label_sd_list = lv_label_create(screen);
-    lv_obj_set_style_text_color(label_sd_list, lv_color_hex(0xAAAAFF), 0);
-    lv_obj_align(label_sd_list, LV_ALIGN_BOTTOM_LEFT, 4, -24);
-    lv_label_set_long_mode(label_sd_list, LV_LABEL_LONG_SCROLL);
-    lv_obj_set_width(label_sd_list, 280);
-
-    anim_rect = lv_obj_create(screen);
-    lv_obj_set_size(anim_rect, 20, 20);
-    lv_obj_set_style_bg_color(anim_rect, lv_color_hex(0xFF0000), 0);
-    lv_obj_set_style_radius(anim_rect, 4, 0);
-    lv_obj_align(anim_rect, LV_ALIGN_TOP_LEFT, anim_x, 10);
-
+    
     HardwareService::init();
+    StatusBarManager::init(screen);
+    
+    // Create a black rectangle to cover the main area (not the status bars)
+    lv_obj_t *black_area = lv_obj_create(screen);
+    const int top_bar_height = 28;
+    const int right_bar_width = 54;
+    lv_obj_set_size(black_area, EXAMPLE_LCD_H_RES - right_bar_width, EXAMPLE_LCD_V_RES - top_bar_height);
+    lv_obj_align(black_area, LV_ALIGN_TOP_LEFT, 0, top_bar_height);
+    lv_obj_set_style_bg_color(black_area, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(black_area, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(black_area, 0, LV_PART_MAIN);
+    lv_obj_move_background(black_area);
+    
+    // Process SD card and battery as before
     if (HardwareService::isSDMounted()) {
-        lv_label_set_text(label_sd_status, "SD mounted");
         if (HardwareService::tryLockSD()) {
-            lv_label_set_text(label_sd_list, HardwareService::listSD().c_str());
+            String files = HardwareService::listSD();
+            int fileCount = std::count(files.begin(), files.end(), '\n');
+            StatusBarManager::setFileCount(fileCount);
             HardwareService::unlockSD();
         }
-    } else {
-        lv_label_set_text(label_sd_status, "SD mount failed");
+    }
+
+    float voltage = HardwareService::readBatteryVoltage();
+    StatusBarManager::setBatteryVoltage(voltage);
 }
 
-}
+
 
 void loop() {
     static unsigned long last_tick = 0;
+    static unsigned long last_ui_update = 0;
     unsigned long now = millis();
 
+    // Let LVGL tick (timekeeping) progress regardless
     if (now - last_tick >= 5) {
         lv_tick_inc(now - last_tick);
         last_tick = now;
     }
 
-    lv_timer_handler();
-    update_animation();
-    update_encoder();
-
-    if (now - last_battery_update > 1000) {
-        last_battery_update = now;
-        update_battery();
+    // Update screen elements at 60 FPS
+    if (now - last_ui_update >= 16) {
+        last_ui_update = now;
+        lv_timer_handler();
+        StatusBarManager::update(now);
     }
+    
+    // Remove the periodic background refreshing - it might be causing issues
+    // Also remove the lcd_fill(0, 0, EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES, 0x001F);
 }
+
