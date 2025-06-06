@@ -17,4 +17,6 @@ namespace HardwareService {
     bool tryLockSD();
     void unlockSD();
     float readBatteryVoltage();
+    int countSDFiles();
+    String listDirectory(const char* path = "/");
 }

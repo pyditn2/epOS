@@ -15,6 +15,8 @@ private:
     static lv_obj_t* rightBar;
     static lv_obj_t* label_battery;
     static lv_obj_t* label_files;
+    static lv_obj_t* label_encoder;
+    static lv_obj_t* encoder_indicator;
 
     static lv_obj_t* anim_ball;
     static int anim_x;

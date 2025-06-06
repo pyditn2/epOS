@@ -6,6 +6,8 @@ lv_obj_t* StatusBarManager::topBar = nullptr;
 lv_obj_t* StatusBarManager::rightBar = nullptr;
 lv_obj_t* StatusBarManager::label_battery = nullptr;
 lv_obj_t* StatusBarManager::label_files = nullptr;
+lv_obj_t* StatusBarManager::label_encoder = nullptr;
+lv_obj_t* StatusBarManager::encoder_indicator = nullptr;
 
 lv_obj_t* StatusBarManager::anim_ball = nullptr; 
 int StatusBarManager::anim_x = 10;    
@@ -50,6 +52,21 @@ void StatusBarManager::init(lv_obj_t* parent) {
     lv_obj_set_style_text_color(label_files, lv_color_white(), 0);
     lv_obj_align(label_files, LV_ALIGN_TOP_MID, 0, 20);
 
+    // Encoder value label
+    label_encoder = lv_label_create(rightBar);
+    lv_label_set_text(label_encoder, "Enc: 0");
+    lv_obj_set_style_text_color(label_encoder, lv_color_white(), 0);
+    lv_obj_align(label_encoder, LV_ALIGN_TOP_MID, 0, 60);
+
+    // Encoder press indicator
+    encoder_indicator = lv_obj_create(rightBar);
+    lv_obj_set_size(encoder_indicator, 12, 12);
+    lv_obj_set_style_bg_color(encoder_indicator, lv_color_hex(0x333333), 0); // Dim when not pressed
+    lv_obj_set_style_bg_opa(encoder_indicator, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(encoder_indicator, 6, 0); // Make it circular
+    lv_obj_clear_flag(encoder_indicator, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(encoder_indicator, LV_ALIGN_TOP_MID, 0, 80);
+
     // Moving ball
     anim_ball = lv_obj_create(rightBar);
     lv_obj_set_size(anim_ball, 16, 16);
@@ -92,6 +109,26 @@ void StatusBarManager::update(unsigned long now) {
         last_battery_update = now;
         float voltage = HardwareService::readBatteryVoltage();
         setBatteryVoltage(voltage);
+    }
+    
+    // Update encoder value display
+    int encoderDelta = HardwareService::getEncoderDelta();
+    if (encoderDelta != 0) {
+        static int encoderValue = 0;
+        encoderValue += encoderDelta;
+        char buf[16];
+        snprintf(buf, sizeof(buf), "Enc: %d", encoderValue);
+        lv_label_set_text(label_encoder, buf);
+    }
+    
+    // Update encoder press indicator
+    bool isPressed = HardwareService::wasEncoderPressed();
+    if (isPressed) {
+        // Light up when pressed (bright green)
+        lv_obj_set_style_bg_color(encoder_indicator, lv_color_hex(0x00FF00), 0);
+    } else {
+        // Dim when not pressed
+        lv_obj_set_style_bg_color(encoder_indicator, lv_color_hex(0x333333), 0);
     }
 }
 
