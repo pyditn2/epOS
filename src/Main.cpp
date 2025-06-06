@@ -79,6 +79,7 @@ void setup() {
 }
 
 void loop() {
+    HardwareService::update();
     static unsigned long last_tick = 0;
     static unsigned long last_ui_update = 0;
     unsigned long now = millis();

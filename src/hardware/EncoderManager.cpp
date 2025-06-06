@@ -1,53 +1,65 @@
 #include "EncoderManager.h"
 #include <Arduino.h>
 
-int EncoderManager::clkPin, EncoderManager::dtPin, EncoderManager::swPin;
-int EncoderManager::lastClk = HIGH, EncoderManager::lastSw = HIGH;
-int EncoderManager::delta = 0;
-bool EncoderManager::pressed = false;
-unsigned long EncoderManager::pressTime = 0;
+// Define static member variables
+int EncoderManager::clkPin = -1;
+int EncoderManager::dtPin = -1;
+int EncoderManager::swPin = -1;
+int EncoderManager::lastClkState = HIGH;
+int EncoderManager::lastSwState = HIGH;
+volatile int EncoderManager::encoderValue = 0;
+volatile bool EncoderManager::buttonPressed = false;
 
 void EncoderManager::begin(int clk, int dt, int sw) {
-    clkPin = clk; dtPin = dt; swPin = sw;
+    clkPin = clk;
+    dtPin = dt;
+    swPin = sw;
+    
+    // Enable pullups for stable readings
     pinMode(clkPin, INPUT_PULLUP);
     pinMode(dtPin, INPUT_PULLUP);
     pinMode(swPin, INPUT_PULLUP);
-    lastClk = digitalRead(clkPin);
-    lastSw = digitalRead(swPin);
+    
+    // Initialize states
+    lastClkState = digitalRead(clkPin);
+    lastSwState = digitalRead(swPin);
 }
 
 void EncoderManager::update() {
-    int clk = digitalRead(clkPin);
-    int dt = digitalRead(dtPin);
-    int sw = digitalRead(swPin);
-
-    if (clk != lastClk) {
-        if (dt != clk) delta++;
-        else delta--;
-        lastClk = clk;
+    // Read current states
+    int clkState = digitalRead(clkPin);
+    int dtState = digitalRead(dtPin);
+    int swState = digitalRead(swPin);
+    
+    // Check for rotation
+    if (clkState != lastClkState) {
+        if (dtState != clkState) {
+            encoderValue++;
+        } else {
+            encoderValue--;
+        }
+        lastClkState = clkState;
+        delay(5); // Debounce
     }
-
-    if (sw == LOW && lastSw == HIGH) {
-        pressed = true;
-        pressTime = millis();
+    
+    // Check for button press - only set buttonPressed on transition
+    if (swState == LOW && lastSwState == HIGH) {
+        buttonPressed = true;
     }
-    lastSw = sw;
-
-    if (pressed && millis() - pressTime > 300) {
-        pressed = false;
-    }
+    
+    // Just update the last state without clearing the flag
+    lastSwState = swState;
 }
 
 int EncoderManager::getDelta() {
-    int d = delta;
-    delta = 0;
-    return d;
+    static int lastValue = encoderValue;
+    int delta = encoderValue - lastValue;
+    lastValue = encoderValue;
+    return delta;
 }
 
 bool EncoderManager::wasPressed() {
-    if (pressed) {
-        pressed = false;
-        return true;
-    }
-    return false;
+    bool pressed = buttonPressed;
+    buttonPressed = false; // Clear the flag after reading
+    return pressed;
 }

@@ -123,7 +123,11 @@ void StatusBarManager::update(unsigned long now) {
     
     // Update encoder press indicator
     bool isPressed = HardwareService::wasEncoderPressed();
-    if (isPressed) {
+    
+    // Read the current button state directly for the indicator
+    int currentButtonState = digitalRead(3); // ENCODER_SW pin
+    
+    if (isPressed || currentButtonState == LOW) {
         // Light up when pressed (bright green)
         lv_obj_set_style_bg_color(encoder_indicator, lv_color_hex(0x00FF00), 0);
     } else {
